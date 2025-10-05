@@ -11,7 +11,6 @@ DNS_PORT = 53
 def get_dns_record(udp_socket, domain:str, parent_server: str, record_type):
   q = DNSRecord.question(domain, qtype = record_type)
   q.header.rd = 0   # Recursion Desired?  NO
-  print("DNS query", repr(q))
   udp_socket.sendto(q.pack(), (parent_server, DNS_PORT))
   pkt, _ = udp_socket.recvfrom(8192)
   buff = DNSBuffer(pkt)
@@ -28,7 +27,6 @@ def get_dns_record(udp_socket, domain:str, parent_server: str, record_type):
   """
   
   header = DNSHeader.parse(buff)
-  print("DNS header", repr(header))
   if q.header.id != header.id:
     print("Unmatched transaction")
     return
@@ -119,7 +117,6 @@ def ip_addr(sock, cache, label):
 
         ip = query_cache(cache, label, 'A')
         if ip is not None:
-            print(f"found ip: {ip}")
             return ip
 
         if ns_domain is None:
