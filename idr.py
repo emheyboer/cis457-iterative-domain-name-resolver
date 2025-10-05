@@ -113,6 +113,7 @@ def ip_addr(sock, cache, label):
         (type, ns_domain) = query_server(sock, cache, label, ns, 'A')
         if type == 'CNAME':
            label = ns_domain
+           ns = ROOT_SERVER
            continue
 
         ip = query_cache(cache, label, 'A')
