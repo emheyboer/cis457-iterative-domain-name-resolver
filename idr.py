@@ -1,5 +1,6 @@
 from dnslib import DNSRecord, DNSHeader, DNSBuffer, DNSQuestion, RR, QTYPE, RCODE
 from socket import socket, SOCK_DGRAM, AF_INET
+import time
 
 """
 There are 13 root servers defined at https://www.iana.org/domains/root/servers
@@ -34,40 +35,126 @@ def get_dns_record(udp_socket, domain:str, parent_server: str, record_type):
   if header.rcode != RCODE.NOERROR:
     print("Query failed")
     return
+  
+  records = []
 
   # Parse the question section #2
   for k in range(header.q):
     q = DNSQuestion.parse(buff)
-    print(f"Question-{k} {repr(q)}")
     
   # Parse the answer section #3
   for k in range(header.a):
     a = RR.parse(buff)
-    print(f"Answer-{k} {repr(a)}")
-    if a.rtype == QTYPE.A:
-      print("IP address")
+    records.append(a)
       
   # Parse the authority section #4
   for k in range(header.auth):
     auth = RR.parse(buff)
-    print(f"Authority-{k} {repr(auth)}")
-      
+    records.append(auth)
+
   # Parse the additional section #5
   for k in range(header.ar):
     adr = RR.parse(buff)
-    print(f"Additional-{k} {repr(adr)} Name: {adr.rname}")
+    records.append(adr)
 
-  
+  return records
+
+
+def cache_records(cache: dict, records: list):
+    records.reverse()
+    ns = None
+    for record in records:
+        name = str(record.rname)
+        type = record.rtype
+        expires = time.time() + record.ttl
+        data = str(record.rdata)
+
+        print(record)
+
+        if name not in cache:
+            cache[name] = {}
+
+        if type == QTYPE.CNAME:
+           return ('CNAME', data)
+        
+        if type == QTYPE.A:
+            cache[name]['A'] = {
+                'expires': expires,
+                'data': data
+            }
+
+        # only replace an existing NS record if this one comes with a corresponding A record
+        elif type == QTYPE.NS and ('NS' not in cache[name] or (data in cache and 'A' in cache[data])):
+            cache[name]['NS'] = {
+                'expires': expires,
+                'data': data
+            }
+            ns = cache[name]['NS']['data']
+
+    if ns is not None:
+       return ('NS', ns)
+    return ('A', None)
+
+
+def query_cache(cache: dict, domain: str, rtype: str):
+  if domain == '' and rtype == 'NS':
+     return ROOT_SERVER
+  if domain in cache and rtype in cache[domain] and cache[domain][rtype]['expires'] > time.time():
+    return cache[domain][rtype]['data']
+  return None
+
+
+def query_server(sock, cache: dict, label: str, ns: str, rtype: str):
+    records = get_dns_record(sock, label, ns, rtype)
+    return cache_records(cache, records)
+
+
+def ip_addr(sock, cache, label):
+    ns = ROOT_SERVER
+    while True:
+        (type, ns_domain) = query_server(sock, cache, label, ns, 'A')
+        if type == 'CNAME':
+           label = ns_domain
+           continue
+
+        ip = query_cache(cache, label, 'A')
+        if ip is not None:
+            print(f"found ip: {ip}")
+            return ip
+
+        if ns_domain is None:
+           print("no namserver")
+           break
+        
+        ns = query_cache(cache, ns_domain, 'A')
+        if ns is None:
+           ns = ip_addr(sock, cache, ns_domain)
+
+        print(f"ns: {ns}")
+
+
 if __name__ == '__main__':
-  # Create a UDP socket
-  sock = socket(AF_INET, SOCK_DGRAM)
-  # Get all the .edu name servers from the ROOT SERVER
-  get_dns_record(sock, "edu", ROOT_SERVER, "NS")
-  
-  # The following function calls are FAILED attempts to use Google Public DNS
-  # (1) to get name servers which manages gvsu.edu
-  # (2) to resolve the IP address of www.gvsu.edu
-  get_dns_record(sock, "gvsu.edu", "8.8.8.8", "NS")      # (1)
-  get_dns_record(sock, "www.gvsu.edu", "8.8.8.8", "A")   # (2)
-  
-  sock.close()
+    sock = socket(AF_INET, SOCK_DGRAM)
+    sock.settimeout(2)
+
+
+    cache = dict()
+
+    while True:
+        domain_name = input("Enter a domain name or .exit > ")
+
+        if domain_name == '.exit':
+            break
+        if domain_name == '.clear':
+            cache.clear()
+        if domain_name == '.list':
+            pass
+        if domain_name == '.remove':
+            pass
+
+        if not domain_name.endswith('.'):
+            domain_name += '.'
+
+        ip_addr(sock, cache, domain_name)
+
+    sock.close()
