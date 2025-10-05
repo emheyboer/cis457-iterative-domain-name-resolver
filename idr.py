@@ -29,10 +29,11 @@ def get_dns_record(udp_socket, domain:str, parent_server: str, record_type):
   header = DNSHeader.parse(buff)
   if q.header.id != header.id:
     print("Unmatched transaction")
-    return
+    return None
   if header.rcode != RCODE.NOERROR:
-    print("Query failed")
-    return
+    print("name server could not answer query")
+    print(f"the domain '{domain}' may not exist")
+    return None
   
   records = []
 
@@ -59,7 +60,6 @@ def get_dns_record(udp_socket, domain:str, parent_server: str, record_type):
 
 
 def cache_records(cache: dict, records: list):
-    records.reverse()
     ns = None
     for record in records:
         name = str(record.rname)
@@ -67,13 +67,17 @@ def cache_records(cache: dict, records: list):
         expires = time.time() + record.ttl
         data = str(record.rdata)
 
-        print(record)
+        # print(record)
 
         if name not in cache:
             cache[name] = {}
 
         if type == QTYPE.CNAME:
-           return ('CNAME', data)
+            cache[name]['CNAME'] = {
+                'expires': expires,
+                'data': data
+            }
+            return ('CNAME', data)
         
         if type == QTYPE.A:
             cache[name]['A'] = {
@@ -104,13 +108,27 @@ def query_cache(cache: dict, domain: str, rtype: str):
 
 def query_server(sock, cache: dict, label: str, ns: str, rtype: str):
     records = get_dns_record(sock, label, ns, rtype)
+    if records is None:
+       return (None, None)
     return cache_records(cache, records)
 
 
 def ip_addr(sock, cache, label):
+    ns_domain = None
     ns = ROOT_SERVER
+
+    ip = query_cache(cache, label, 'A')
+    if ip is not None:
+        print(f"found cached A record for {label}")
+        return ip
+    
     while True:
+        print(f"asking for records from {ns if ns_domain is None else ns_domain} ({ns})")
         (type, ns_domain) = query_server(sock, cache, label, ns, 'A')
+
+        if type is None:
+           return
+        
         if type == 'CNAME':
            label = ns_domain
            ns = ROOT_SERVER
@@ -126,9 +144,7 @@ def ip_addr(sock, cache, label):
         
         ns = query_cache(cache, ns_domain, 'A')
         if ns is None:
-           ns = ip_addr(sock, cache, ns_domain)
-
-        print(f"ns: {ns}")
+            ns = ip_addr(sock, cache, ns_domain)
 
 
 def commands(cmd: str):
@@ -171,6 +187,7 @@ if __name__ == '__main__':
             domain_name += '.'
 
         ip = ip_addr(sock, cache, domain_name)
-        print(ip)
+        if ip is not None:
+           print(ip)
 
     sock.close()
