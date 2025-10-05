@@ -130,6 +130,26 @@ def ip_addr(sock, cache, label):
         print(f"ns: {ns}")
 
 
+def commands(cmd: str):
+    if cmd == '.clear':
+        cache.clear()
+    elif cmd == '.list':
+        i = 0
+        for key in list(cache.keys()):
+            i += 1
+            print(f"{i} {key}: {cache[key]}")
+    elif cmd.startswith('.remove'):
+        split = cmd.split(' ')
+        if len(split) != 2:
+            print("usage: .remove N")
+        index = int(split[1])
+        i = 0
+        for key in list(cache.keys()):
+            i += 1
+            if i == index:
+                del cache[key]
+
+
 if __name__ == '__main__':
     sock = socket(AF_INET, SOCK_DGRAM)
     sock.settimeout(2)
@@ -142,16 +162,14 @@ if __name__ == '__main__':
 
         if domain_name == '.exit':
             break
-        if domain_name == '.clear':
-            cache.clear()
-        if domain_name == '.list':
-            pass
-        if domain_name == '.remove':
-            pass
+        if domain_name.startswith('.'):
+           commands(domain_name)
+           continue
 
         if not domain_name.endswith('.'):
             domain_name += '.'
 
-        ip_addr(sock, cache, domain_name)
+        ip = ip_addr(sock, cache, domain_name)
+        print(ip)
 
     sock.close()
